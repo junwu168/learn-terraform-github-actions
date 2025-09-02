@@ -1,0 +1,57 @@
+name: "Terraform Destroy"
+
+on:
+  workflow_dispatch:
+    inputs:
+      workspace:
+        description: "HCP Terraform workspace"
+        required: true
+        default: "learn-terraform-github-actions"
+      confirm:
+        description: 'Type "DESTROY" to confirm'
+        required: true
+
+env:
+  TF_CLOUD_ORGANIZATION: "wujunmingtest"
+  TF_API_TOKEN: "${{ secrets.TF_API_TOKEN }}"
+  CONFIG_DIRECTORY: "./"
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    name: "Destroy ${{ github.event.inputs.workspace }}"
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'DESTROY' }}
+    # optional: gate with a protected environment in repo settings
+    environment: destroy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload Configuration
+        id: upload
+        uses: hashicorp/tfc-workflows-github/actions/upload-configuration@v1.0.0
+        with:
+          workspace: ${{ github.event.inputs.workspace }}
+          directory: ${{ env.CONFIG_DIRECTORY }}
+
+      - name: Create Destroy Run
+        id: run
+        uses: hashicorp/tfc-workflows-github/actions/create-run@v1.0.0
+        with:
+          workspace: ${{ github.event.inputs.workspace }}
+          configuration_version: ${{ steps.upload.outputs.configuration_version_id }}
+          message: "Destroy run from GitHub Actions (${ { github.sha } })"
+          # key bit: request a destroy run (sets Runs API is-destroy=true)
+          is_destroy: true
+
+      # Apply if TFC says the run needs confirmation (same pattern you use today)
+      - name: Apply Destroy Run
+        if: fromJSON(steps.run.outputs.payload).data.attributes.actions.IsConfirmable
+        uses: hashicorp/tfc-workflows-github/actions/apply-run@v1.0.0
+        with:
+          run: ${{ steps.run.outputs.run_id }}
+          comment: "Apply destroy from GitHub Actions ${{ github.sha }}"
